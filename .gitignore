@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+tests/_work/
+.claude/launch.json
+build/
+dist/
+.DS_Store

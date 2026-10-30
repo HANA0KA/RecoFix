@@ -1,0 +1,408 @@
+===== dr_message_define.proto len 10407
+package dr_engine_service
+message Empty
+message DevicePartition
+   string drive_letter = 1
+   int64 partition_length = 2
+   int32 partition_type = 3
+   int64 free_sectors = 4
+   int32 bytes_per_sector = 5
+   int32 sectorts_per_cluster = 6
+   int32 index_number = 7
+   string volume_label = 8
+   string device_serial = 9
+   bool efi_partition = 10
+   int32 partition_encryption = 11
+   bool lost_flag = 12
+   uint64 serial_number = 13
+   int32 disk_nuberl = 14
+   int32 physical_disk_number = 15
+   int32 physical_index_number = 16
+   uint64 device_id = 17
+   string volume_mount_point = 18
+   uint64 physical_start_offset = 19
+   string volume_uuid = 20
+   string media_uuid = 21
+   uint64 volume_save_key = 22
+   .dr_engine_service.DeviceType device_type = 23
+   .dr_engine_service.ProtectedType protected_type = 24
+message Volume
+   uint32 cylinders = 1
+   int32 setup_category = 2
+   uint32 tracks_per_cylinder = 3
+   uint32 sectors_per_track = 4
+   uint32 bytes_per_sector = 5
+   int64 disk_size = 6
+   int32 index = 7
+   string model = 8
+   string moserialnumberdel = 9
+message DeviceEnumReply
+   int32 error = 1
+   int32 id = 2
+   .dr_engine_service.DevicePartition partition_info = 3
+   .dr_engine_service.Volume volume_info = 4
+message PreviewRequest
+   int64 file_id = 1
+   int64 file_sz = 2
+   int64 offset = 3
+   bytes save_path = 4
+   int32 preview_mode = 5
+message PreviewReply
+   uint32 file_id = 1
+   uint32 size = 2
+   uint32 offset = 3
+   int32 error = 4
+   bytes data = 5
+message RecoverNode
+   int64 root_id = 1
+   int64 id = 2
+   bool is_folder = 3
+message RecoverFolderMessage
+   int64 root_id = 1
+   int64 folder_id = 2
+   string top_folder_name = 3
+   string folder_path = 4
+message RecoverFileMessage
+   int64 file_id = 1
+   bool is_recycle = 2
+   string file_path = 4
+message RecoverTagMessage
+   int64 root_id = 1
+   int64 file_id = 2
+message RecoverFilterCondition
+   bytes file_type = 1
+   int64 time_start = 2
+   int64 time_end = 3
+   int64 file_size_min = 4
+   int64 file_size_max = 5
+   .dr_engine_service.RecoverFileStatus detele_flag = 6
+   bytes file_name = 7
+   bytes file_group = 8
+   bool is_match_union = 9
+message RecoverRequest
+   int64 all_file_count = 1
+   int64 curent_index = 2
+   int64 packet_count = 3
+   string save_path = 4
+  repeated .dr_engine_service.RecoverFolderMessage folder_info = 5
+   bool has_filter_condition = 6
+   .dr_engine_service.RecoverFilterCondition filter_info = 7
+  repeated .dr_engine_service.RecoverFileMessage file_info = 8
+   .dr_engine_service.AntiPriacyInfo anti_info = 9
+  repeated .dr_engine_service.RecoverTagMessage tag_info = 10
+   bool is_cloud_location = 11
+message recover_type_info
+   string file_type = 1
+   int64 count_t = 2
+message RecoverReply
+   int64 successed_count = 1
+   int64 failed_count = 2
+   int64 all_count = 3
+   int64 runlist_error_count = 4
+   int64 recover_bytes = 5
+   int64 failed_bytes = 6
+   int64 recover_state = 7
+  repeated .dr_engine_service.recover_type_info recover_failed_types = 8
+  repeated bytes recover_error_types = 9
+  repeated bytes recover_sector_errors = 10
+  repeated .dr_engine_service.recover_type_info recover_type = 11
+message DefualtReply
+   int32 error = 1
+message FolderNode
+   int64 root_id = 1
+   int64 id = 2
+message AntiPriacyInfo
+   bool need_antipriacy = 1
+   bytes clientsign = 2
+   bytes member_id = 3
+   bytes user_name = 4
+   bytes passwd = 5
+   bool has_china = 6
+message AntiPriacyReply
+   .dr_engine_service.AntipariacyCode type = 1
+   int32 code = 2
+   int32 internet_code = 3
+   bool callback = 4
+message ScanRequset
+   uint64 device_id = 1
+   int32 sacn_type = 2
+   int32 deep_scan_type = 3
+   int32 scan_file_staus = 4
+   string raw_file_types = 5
+   bool recycle_scan = 6
+   string scan_path = 7
+   string lost_filename_text = 8
+   string advance_type = 9
+   int32 device_type = 10
+   string user_info = 11
+   string device_info = 12
+   int32 cloud_drive_type = 13
+message ScanReply
+   int32 scan_result_code = 1
+message RemoteConnectInfo
+   bytes remoto_info = 1
+message RootFolderInfo
+   .dr_engine_service.RootFolderType folder_type = 1
+   int64 file_size = 2
+   int64 file_count = 3
+   int64 root_id = 4
+   int64 folder_id = 5
+   bytes folder_name = 6
+   int32 root_node_type = 7
+message Md5ErrorInfo
+   .dr_engine_service.Md5ErrorType type_ = 1
+   bytes exemd5 = 2
+   bytes dllmd5 = 3
+message BlockDiagramReply
+   bytes data_info = 1
+   int32 length = 2
+message ProgressReply
+   .dr_engine_service.ProgressType type = 1
+   int64 current_count = 2
+   int64 total_count = 3
+   int64 current_progress = 4
+   bytes file_name = 5
+message PasswordInfoRequest
+   bytes hint = 1
+   int64 count = 2
+message PasswordInfoReply
+   bool cancel = 1
+   bytes pass_word = 2
+message PasswordInfo
+   .dr_engine_service.PasswordInfoRequest password_request = 1
+   .dr_engine_service.PasswordInfoReply passworld_reply = 2
+message ReleaseRequest
+   int32 index = 1
+message MetaDataRequest
+   int64 file_id = 1
+message MetaDataReply
+   bytes make = 1
+   bytes model = 2
+   bytes create_time = 3
+   bytes fixable = 4
+message SDCardInfoRequset
+   uint64 device_id = 1
+message SDCardInfoReply
+   bytes make = 1
+   bytes model = 2
+   bytes display = 3
+   int32 type = 4
+   int32 sub_type = 5
+message ReconnectRequest
+   int32 state = 1
+   int64 type = 2
+message ReconnectReply
+   bool cancel = 1
+   bool reconnect = 2
+message ReconnectInfo
+   .dr_engine_service.ReconnectRequest reconnect_request = 1
+   .dr_engine_service.ReconnectReply reconnect_reply = 2
+message RecoverFinishInfo
+   bytes finish_info = 1
+message RecoverFinishReply
+   int64 err_code = 1
+   bytes err_msg = 2
+message NotifyRequest
+   .dr_engine_service.Messagetype type = 1
+   .dr_engine_service.PasswordInfoReply pass_word_reply = 2
+   .dr_engine_service.ReconnectReply reconnect_reply = 3
+   .dr_engine_service.ReleaseRequest release_info = 4
+   .dr_engine_service.MetaDataRequest mete_data_request = 5
+   .dr_engine_service.RecoverFinishInfo recover_finish_info = 6
+   .dr_engine_service.RemoteConnectInfo remote_connect_info = 7
+message NotifyInfo
+   int64 code1 = 1
+   int64 code2 = 2
+   bytes code_info = 3
+message DataRequest
+   .dr_engine_service.DataType data_type = 1
+   bytes code_info = 2
+message DataReply
+   .dr_engine_service.DataType data_type = 1
+   bytes code_info = 2
+message NotifyReply
+   .dr_engine_service.Messagetype type = 1
+   .dr_engine_service.ProgressReply prgress_info = 2
+   .dr_engine_service.PasswordInfoRequest pass_wold_request = 3
+   .dr_engine_service.ReconnectRequest reconnet_request = 4
+   .dr_engine_service.AntiPriacyReply antiproacy_info = 5
+   .dr_engine_service.RootFolderInfo root_node_info = 6
+   .dr_engine_service.MetaDataReply mete_data_reply = 7
+   .dr_engine_service.BlockDiagramReply diagram_reply = 8
+   .dr_engine_service.Md5ErrorInfo md5_error_info = 9
+   .dr_engine_service.ScanReply scan_replt = 10
+   .dr_engine_service.DeviceEnumReply device_enum_reply = 11
+   .dr_engine_service.RecoverReply recover_reply = 12
+   .dr_engine_service.PreviewReply preview_reply = 13
+   .dr_engine_service.RecoverFinishReply recover_finish_reply = 14
+   .dr_engine_service.NotifyInfo notify_info = 15
+message AuthorizationRequest
+   .dr_engine_service.AuthorizationType data_type = 1
+   .dr_engine_service.LocationType cloud_type = 2
+   bytes client_uuid = 3
+message AuthorizationReply
+   .dr_engine_service.AuthorizationType data_type = 1
+   .dr_engine_service.CloudLoginStatus logine_statue = 2
+   bytes authorization_url = 3
+   bool login_success = 4
+   int64 cloud_free_space = 5
+   bytes drive_files_url = 6
+message ActivateAiSceneModelRequest
+   string model_dir = 1
+enum DeviceType { kUnknow=0, kLocalDisk=1, kRemoveDisk=2, kRemoveFlash=3 }
+enum ProtectedType { Protected_Nolock=0, Protected_Locked=1, Protected_Unlocked=2, Protected_Unlock_Blocked=6, Protected_NoKeys=7, Protected_Unknow=255 }
+enum RecoverFileStatus { kDelete=0, kExist=1, kAll=2 }
+enum LocationType { kLocal=0, kGoogleColud=1, kOnedrive=2 }
+enum AntipariacyCode { kMd5Failed=0, kTimeOut=1, kCheckError=2 }
+enum Messagetype { kMsgUnknow=0, kMsgStopScan=1, kMsgPauseScan=2, kMsgResumeScan=3, kMsgStopRecover=4, kMsgPauseRecover=5, kMsgResumeRecover=6, kMsgProgress=7, kMsgPassword=8, kMsgReConnect=9, kMsgSectorError=10, kMsgAntiPriacyExchange=11, kMsgRelease=12, kMsgBlockDiagram=13, kMsgSectorFatal=14, kMsgRootFolderInfo=15, kMsgMeteDataInfo=16, kMsgMd5Check=17, kMsgRecovering=18, kMsgScanFinish=19, kMsgRecvoerFinish=20, kMsgPreviewFinish=21, kMsgDevicesFound=22, kMsgQueryDiskInfoFinish=23, kMsgRecoverFinished=24, kMsgEncryptedVolumeFinish=25, kMsgCreateScanopreaterFinish=26, kMsgPreviewing=27, kMsgStartScan=28, kMsgScanError=29, kMsgQueryDiskInfoError=30, kMsgBitlockerDriveLocked=31, kMsgBitlockerDriveReopenSuccess=32, kMsgBitlockerDriveReopenFailed=33, kMsgIsolatedFileNode=34, kMsgIoJumpOverFileErrorCounts=35, kMsgRawIdentifyStatus=36, kMsgRemoteConnectStatus=37, kMsgSystemInfo=38, kMsgExit=39, KMsgCloseConnection=40, KMsgCreateTempPath=41, kMsgSaveScanRecordStart=42, kMsgSaveScanRecordFinish=43, kMsgSaveScanRecordStop=44, kMsgSaveScanRecordError=45, kMsgLoadScanRecordStart=46, kMsgLoadScanRecordFinish=47, kMsgLoadScanRecordStop=48, kMsgLoadScanRecordError=49, kMagTransFolderItemsInfo=50, kMsgLoadingScanSector=51, kMsgLoadScanSectorFinish=52, kMsgAdvancedScan2ndPhase=53, kMsgConstructDataStart=54, kMsgConstructDataFinish=55, kMsgLoginICloudSucceed=56, kMsgAppleIdPasswordFailed=57, kMsgICloudGetFileSumInfoStart=58, kMsgICloudGetFileSumInfoFinish=59, kMsgRecoveringFileSummary=60, kMsgHighValueFileRecommendation=61, kMsgCurrentScanningPath=62, kMsgAiSceneTagStart=63, kMsgAiSceneTagFinish=64, kMsgVideoReassemblyStart=65 }
+enum Md5ErrorType { kNotFindProgram=0, kWrongMd5Value=1, kNotFindTargetmd5=2 }
+enum RootFolderType { kRootPathFolder=0, kRootTypeFolder=1, kRootTypeTag=2 }
+enum ProgressType { kScanSectorProgress=0, kRecoverProgress=1, kQuickScanProgress=2, kSaveScanRecordProgress=3, kLoadScanRecordProgress=4, kConstructDataProgress=5, kAiSceneTagProgress=6 }
+enum DataType { kMsgRequestRootNodesInfo=0, kMsgRequestChildNotesInfo=1, kMsgRequestSortSummary=2, kMsgRequestSortInfo=3, kMsgRequestFilterSunmmary=4, kMsgRequestFilterInfo=5, kMsgRequestSearchSummary=6, kMsgRequestSearchInfo=7, kMsgRequestTagInfo=8, kMsgRequestNodeStatusCheck=9, kMsgRequestSaveScanResulut=10, kMsgRequestLoadScanResulut=11, kMsgRequestFolderselfInfo=12, kMsgRequestFileselfInfo=13, kMsgRequestSearchCheckInfo=14, kMsgRequestVideodataInfo=15, kMsgRequestExpandFolder=16, kMsgExportDebugReport=17, kMsgRequestNodeStatusCheckNew=18, kMsgRequestFileDetailInfo=19, kMsgRequestSimilarFiles=20, kMsgRequestSDCardInfo=21, kMsgRequestHighValueFiles=22, kMsgRequestBadSectorCount=23, kMsgRequestLocateFile=24, kMsgCheckFileDamaged=25, kMsgActivateAiSceneModel=26 }
+enum CloudLoginStatus { Logined=0, Unlogin=1 }
+enum AuthorizationType { kMsgCloudLoginStatue=0, kMsgCloudLogin=1, kMsgCloudExitLogin=2, kMsgCloudAuthorizationUrl=3, kMsgCloudFreeSapce=4, kMsgCloudStopLogin=5, kMsgSetCloudtype=6, kMsgDriveFilesUrl=7 }
+===== dr_scan_result.proto len 3740
+package dr
+message RootSummaryRequest
+   .dr.RootShowType root_type = 1
+   bool is_filter = 2
+message FolderNodeInfo
+   int64 root_id = 1
+   int64 id = 2
+   bytes name = 3
+   uint64 file_count_recurse = 4
+   uint64 file_count = 5
+   uint64 folder_count = 6
+   uint64 total_size_recurse = 7
+   int64 root_type = 8
+   .dr.CheckStatus check_status = 9
+   uint64 total_checked_file_count_recurse = 10
+   uint64 total_checked_file_size_recurse = 11
+   uint64 mtime = 12
+   bytes folder_path = 13
+message FileNodeInfo
+   int64 id = 1
+   bytes name = 2
+   uint64 size = 3
+   uint64 mtime = 4
+   bytes folder_path = 5
+   bytes file_ext = 6
+   bool file_status_exist = 7
+   int64 root_type = 8
+   .dr.CheckStatus check_status = 9
+   bool is_advanced_file = 10
+message CheckStatusRequest
+   .dr.CheckStatus check_status = 1
+   .dr.NodeInfo node_info = 2
+   bool filter_model = 3
+message CheckStatusRequestNew
+   .dr.CheckStatus check_status = 1
+  repeated int64 file_ids = 2
+  repeated int64 folder_ids = 3
+   bool filter_model = 4
+message NodeInfo
+   .dr.FileNodeInfo file_info = 1
+   .dr.FolderNodeInfo folder_info = 2
+   bytes partition_name = 4
+message NodeSummaryRequest
+   int32 root_id = 1
+   int64 node_id = 2
+   uint32 start_index = 4
+   uint32 count = 5
+   bool filter_model = 6
+   .dr.SortType sort_type = 7
+   bool desc = 8
+   .dr.ChildNodeType node_type = 9
+message NodeExpandStatusRequest
+   int32 root_id = 1
+   int64 node_id = 2
+   bool is_expand = 3
+message SearchSortSummarytRequest
+   .dr.SortType sort_type = 1
+   bool desc = 2
+   .dr.FilterCondition filter_condition = 3
+   .dr.CheckStatus search_check_all = 4
+message SearchSortSummarytRespond
+   int32 error_t = 1
+   int64 filter_count = 2
+   int64 filter_size = 3
+   int64 filter_folder_count = 4
+   int64 filter_file_count = 5
+message SearchSortInfoRequest
+   uint32 start_index = 1
+   uint32 count = 2
+message FilterCondition
+   bytes file_type = 1
+   int64 time_start = 2
+   int64 time_end = 3
+   int64 file_size_min = 4
+   int64 file_size_max = 5
+   .dr.FileStatus detele_flag = 6
+   bytes file_name = 7
+  repeated bytes file_tag = 8
+   bytes file_group = 9
+   bytes search_file_group = 10
+  repeated bytes ai_scene_tag = 11
+message FilterCountRequest
+   .dr.FilterCondition filter_coditon = 4
+   .dr.CheckStatus search_check_all = 5
+message FilterCountResponse
+   int32 error = 1
+   int64 filter_count = 2
+   int64 filter_size = 3
+   int64 filter_folder_count = 4
+   int64 filter_file_count = 5
+message SearchCheckCountResponse
+   .dr.CheckStatus search_result_checkstatus_ = 1
+   int64 filter_checked_all_files_count = 3
+   int64 filter_checked_all_files_size = 4
+message SearchInfoRequest
+   uint32 start_index = 3
+   uint32 count = 4
+message NodeInfoResponse
+   int32 error = 1
+  repeated .dr.NodeInfo node_info = 2
+message tag_info
+   bytes tag_name = 1
+   int64 tag_count = 2
+message Video_info
+   int64 file_id = 1
+message FilterStatisticsInfo
+   int64 file_size_less_than_1mb = 1
+   int64 file_size_1mb_100mb = 2
+   int64 file_size_100mb_1gb = 3
+   int64 file_size_more_than_1gb = 4
+   int64 file_mdtime_less_oneday = 5
+   int64 file_mdtime_yesterday = 6
+   int64 file_mdtime_day_oneweek = 7
+   int64 file_mdtime_week_onemonth = 8
+   int64 file_mdtime_mouth_onewyear = 9
+   int64 file_status_deleted = 10
+   int64 file_status_exist = 11
+  repeated .dr.tag_info tag_items = 12
+  repeated .dr.tag_info ai_scene_tag_items = 13
+   int64 ai_scene_tagged_total = 14
+message StringResponse
+   bool success = 1
+   string error_message = 2
+   string data = 3
+message LocateFileRequest
+   int64 file_id = 1
+   int64 folder_id = 2
+message LocateFileResponse
+   int32 error = 1
+   int64 target_folder_id = 2
+  repeated int64 ancestor_folder_ids = 3
+   int64 locate_file_id = 4
+   int64 locate_folder_id = 5
+   int64 root_id = 6
+message FileDamageRequest
+   int64 file_id = 1
+message FileDamageReply
+   int64 file_id = 1
+   int32 status = 2
+enum RootShowType { kFILEPATH=0, kFILETYPE=1, kFILETIME=2 }
+enum ChildNodeType { kGetAllType=0, kGetFolderType=1, kGetFileType=2 }
+enum CheckStatus { kUNCHECK=0, kHALFCHECK=1, kCHECKED=2 }
+enum SortType { kNONE=0, kFILENAME=1, kSIZE=2, kDATE=3, kTYPE=4, kPATH=5 }
+enum FileStatus { kDelete=0, kExist=1, kAll=2 }
