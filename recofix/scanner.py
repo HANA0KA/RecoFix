@@ -83,12 +83,32 @@ def _build_pivots(handlers):
 
 
 class Scan:
-    def __init__(self, path, deep=True, categories=None, align=None, volume_index=None, log=None):
+    """One scan session.
+
+    Options mirror Recoverit's ``ScanRequset`` (see docs/REVERSE_ENGINEERING.md):
+    ``deep`` (quick = filesystem only), ``categories``/``exts`` (raw_file_types),
+    ``scope`` (scan_path: only entries under this folder of the volume),
+    ``lost_partitions`` (search unpartitioned space for deleted volumes) and
+    ``resume_from`` (continue a deep pass from a saved session).
+    """
+
+    def __init__(self, path, deep=True, categories=None, align=None, volume_index=None, log=None,
+                 exts=None, scope=None, lost_partitions=True, resume_from=0, label="", mode="disk"):
         self.path = path
         self.deep = deep
         self.categories = set(categories) if categories else None
+        self.exts = {e.lower().lstrip(".") for e in exts} if exts else None
+        self.scope = "/" + scope.strip("/") if scope and scope.strip("/") else None
+        self.lost_partitions = lost_partitions
+        self.resume_from = resume_from
+        self.label = label or os.path.basename(path)
+        self.mode = mode
         self.align = align
         self.volume_index = volume_index
+        self.paused = threading.Event()
+        self.current_path = ""
+        self.lost = []
+        self._src = None
         self.items = []
         self.volumes = []
         self.phase = "preparando"
@@ -111,6 +131,10 @@ class Scan:
         cat = kw.get("category")
         if self.categories and cat not in self.categories:
             return None
+        if self.exts and kw.get("ext") not in self.exts:
+            return None
+        if self.scope and kw.get("group") != "raw" and not (kw.get("path") or "").startswith(self.scope + "/"):
+            return None
         with self.lock:
             it = Item(id=len(self.items), **kw)
             self.items.append(it)
@@ -122,19 +146,26 @@ class Scan:
             counts[it.group] = counts.get(it.group, 0) + 1
         el = (self.finished or time.time()) - self.started
         eta = (self.bytes_total - self.bytes_done) / self.speed if self.speed > 0 and self.phase == "profundo" else None
+        bad = len(self._src.bad_ranges) if self._src is not None else self.bad_sectors
         return {"phase": self.phase, "progress": round(self.progress, 4), "bytes_done": self.bytes_done,
                 "bytes_total": self.bytes_total, "speed": self.speed, "eta": eta, "elapsed": el,
                 "found": len(self.items), "groups": counts, "error": self.error, "done": self.finished is not None,
-                "bad_sectors": self.bad_sectors, "volumes": [v.to_dict() for v in self.volumes]}
+                "bad_sectors": bad, "volumes": [v.to_dict() for v in self.volumes], "paused": self.paused.is_set(),
+                "current_path": self.current_path, "lost_partitions": [v.to_dict() for v in self.lost],
+                "deep": self.deep, "mode": self.mode, "label": self.label, "source": self.path,
+                "resume_offset": getattr(self, "resume_offset", 0)}
 
     # ------------------------------------------------------------------ run
 
     def run(self):
         try:
             with Source(self.path) as src:
+                self._src = src
                 self.src_size = src.size
                 self._run(src)
                 self.bad_sectors = len(src.bad_ranges)
+                self.bad_ranges = list(src.bad_ranges)
+                self._src = None
         except Exception as e:  # surfaced in the UI; the scan thread must not die silently
             import traceback
             self.error = "%s: %s" % (type(e).__name__, e)
@@ -152,6 +183,20 @@ class Scan:
             from .fs import Volume
             self.volumes = [Volume(0, src.size, "?", scheme="sin tabla")]
         targets = self.volumes if self.volume_index is None else [self.volumes[self.volume_index]]
+        if self.lost_partitions and self.volume_index is None and not (
+                len(self.volumes) == 1 and self.volumes[0].scheme == "volumen"):
+            self.phase = "buscando particiones perdidas"
+            try:
+                from .partitions import find_lost
+                self.lost = find_lost(src, [v for v in self.volumes if v.fstype != "?" or v.scheme != "sin tabla"],
+                                      self.cancel, lambda p: setattr(self, "progress", p * 0.05))
+            except Exception as e:
+                self.log("búsqueda de particiones: %s" % e)
+                self.lost = []
+            if self.lost:
+                self.volumes = [v for v in self.volumes if v.scheme != "sin tabla"] + self.lost
+            targets = targets + self.lost
+            self.phase = "sistemas de archivos"
         fs_parsers = []
         for v in targets:
             try:
@@ -164,7 +209,7 @@ class Scan:
             v.label = v.label or getattr(fs, "label", "")
             fs_parsers.append((v, fs))
             try:
-                entries = fs.walk()
+                entries = [] if self.resume_from else fs.walk()  # resumed sessions already hold these
             except Exception as e:
                 self.log("error recorriendo %s: %s" % (fs.name, e))
                 entries = []
@@ -173,6 +218,8 @@ class Scan:
                 if self.cancel.is_set():
                     self.phase = "cancelado"
                     return
+                if v.scheme == "perdida":
+                    fe.path = "/[%s perdida @%d MB]%s" % (v.fstype.upper(), v.offset >> 20, fe.path)
                 self._add_entry(src, fe)
         if not self.deep:
             return
@@ -182,11 +229,14 @@ class Scan:
         else:
             start, end = 0, src.size
         align = self.align or 512
+        if self.resume_from:
+            start = max(start, min(end, self.resume_from))
         self._deep(src, start, end, align, fs_parsers)
         self._finish_generic(src)
 
     def _add_entry(self, src, fe):
         name = fe.path.rsplit("/", 1)[-1]
+        self.current_path = fe.path
         ext = name.rsplit(".", 1)[-1].lower() if "." in name.lstrip(".") else ""
         appledouble = name.startswith("._")
         group = "orphan" if fe.origin == "orphan" else "deleted" if fe.deleted else "existing"
@@ -225,9 +275,15 @@ class Scan:
         t0, done0 = time.time(), 0
         orphan_seen = set()
         while pos < end:
+            while self.paused.is_set() and not self.cancel.is_set():
+                self.phase = "en pausa"
+                time.sleep(0.2)
             if self.cancel.is_set():
                 self.phase = "cancelado"
                 return
+            self.phase = "profundo"
+            self.resume_offset = pos
+            self.current_path = "sector %d" % (pos // 512)
             n = min(CHUNK, end - pos)
             buf = src.read(pos, n + MAX_PIVOT)
             if not buf:
