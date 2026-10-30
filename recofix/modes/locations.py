@@ -44,7 +44,10 @@ def resolve_folder(path):
     except Exception:
         pass
     fs = (info.get("FilesystemType") or "").lower()
-    rel = "/" + os.path.relpath(path, mount).strip(".").strip("/") if path != mount else "/"
+    rel = os.path.relpath(path, mount)
+    if rel.startswith(".."):
+        rel = path  # firmlinked into the Data volume (/Users -> /System/Volumes/Data/Users)
+    rel = "/" + rel.strip("/") if rel not in (".", "/") else "/"
     return {
         "device": "/dev/r" + dev[5:] if dev.startswith("/dev/disk") else dev,
         "mount": mount, "fs": fs, "fs_name": info.get("FilesystemName", fs), "scope": rel,

@@ -37,7 +37,7 @@ def backups():
     items = []
     for line in out.splitlines():
         line = line.strip()
-        if line:
+        if line.startswith("/"):
             m = re.search(r"(\d{4}-\d{2}-\d{2}-\d{6})", line)
             items.append({"path": line, "date": _fmt(m.group(1)) if m else os.path.basename(line), "kind": "backup"})
     error = ""
