@@ -8,7 +8,7 @@ PORT=8765
 TOKEN=$(uuidgen | tr -d '-')
 echo "RecoFix — introduce tu contraseña de administrador para acceder a los discos."
 sudo -v || exit 1
-sudo env RECOFIX_TOKEN="$TOKEN" PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" "$PY" -m recofix serve --port "$PORT" --no-browser &
+sudo env PYTHONDONTWRITEBYTECODE=1 RECOFIX_TOKEN="$TOKEN" PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" "$PY" -m recofix serve --port "$PORT" --no-browser &
 SERVER=$!
 for _ in $(seq 1 50); do
   curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break

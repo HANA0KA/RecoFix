@@ -5,7 +5,13 @@ cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 APP="$ROOT/dist/RecoFix.app"
 VERSION=$(python3 -c "import re;print(re.search(r'VERSION = \"(.+?)\"', open('recofix/server.py').read()).group(1))")
-rm -rf "$APP" "$ROOT/build/icon.iconset"
+rm -rf "$ROOT/build/icon.iconset"
+if [ -e "$APP" ] && ! rm -rf "$APP" 2>/dev/null; then
+  # an older build ran its engine as root and left root-owned caches inside the bundle
+  OLD="$ROOT/build/stale-$(date +%Y%m%d%H%M%S).app"
+  mkdir -p "$ROOT/build" && mv "$APP" "$OLD"
+  echo "Aviso: la app anterior tiene archivos de root; movida a $OLD (bórrala con: sudo rm -rf \"$OLD\")"
+fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$ROOT/build"
 
 swiftc -O -swift-version 5 app/main.swift -o "$APP/Contents/MacOS/RecoFix" -framework Cocoa -framework WebKit

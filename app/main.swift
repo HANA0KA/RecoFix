@@ -55,17 +55,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let uid = getuid(), gid = getgid()
         let logDir = NSHomeDirectory() + "/Library/Logs/RecoFix"
         try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
-        let cmd = "cd \(shellQuote(resources)) && env RECOFIX_TOKEN=\(token) SUDO_USER=\(shellQuote(user)) SUDO_UID=\(uid) " +
+        // `do shell script` returns only when every process holding its stdin/stdout/stderr has exited,
+        // so the engine must be the only backgrounded command and must have all three redirected.
+        let cmd = "cd \(shellQuote(resources)); nohup env PYTHONDONTWRITEBYTECODE=1 RECOFIX_APP_PID=\(getpid()) RECOFIX_TOKEN=\(token) SUDO_USER=\(shellQuote(user)) SUDO_UID=\(uid) " +
             "SUDO_GID=\(gid) HOME=\(shellQuote(NSHomeDirectory())) PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin " +
-            "\(python()) -m recofix serve --port \(port) --no-browser > \(shellQuote(logDir + "/engine.log")) 2>&1 &"
+            "\(python()) -m recofix serve --port \(port) --no-browser < /dev/null > \(shellQuote(logDir + "/engine.log")) 2>&1 &"
         let script = "do shell script \"\(cmd.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\" " +
             "with prompt \"RecoFix necesita permisos de administrador para leer los discos en modo de solo lectura.\" with administrator privileges"
-        var err: NSDictionary? = ["skipped": true]
+        var ok = false
         if ProcessInfo.processInfo.environment["RECOFIX_NO_ADMIN"] == nil {
-            err = nil
-            DispatchQueue.main.sync { _ = NSAppleScript(source: script)?.executeAndReturnError(&err) }
+            // osascript in a child process: the password dialog never blocks the app's main thread
+            let osa = Process()
+            osa.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            osa.arguments = ["-e", script]
+            osa.standardInput = FileHandle.nullDevice
+            osa.standardOutput = FileHandle.nullDevice
+            osa.standardError = FileHandle.nullDevice
+            if (try? osa.run()) != nil {
+                let deadline = Date().addingTimeInterval(300)
+                while osa.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+                if osa.isRunning { osa.terminate() } else { ok = osa.terminationStatus == 0 }
+            }
         }
-        if err == nil {
+        if ok {
             privileged = true
         } else {
             // user declined: run unprivileged (disk images, folders, repair still work)
@@ -75,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             p.currentDirectoryURL = URL(fileURLWithPath: resources)
             var env = ProcessInfo.processInfo.environment
             env["RECOFIX_TOKEN"] = token
+            env["PYTHONDONTWRITEBYTECODE"] = "1"  // never write .pyc into the signed bundle
+            env["RECOFIX_APP_PID"] = "\(getpid())"
             env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
             p.environment = env
             try? p.run()

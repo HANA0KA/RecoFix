@@ -593,6 +593,29 @@ def _ls(path, show):
     return {"path": path, "parent": os.path.dirname(path), "entries": entries, "free": st.free, "home": home()}
 
 
+def _watch_parent(httpd):
+    """Stop when the RecoFix.app that started us is gone (force-quit or crash), so no root engine lingers."""
+    try:
+        pid = int(os.environ.get("RECOFIX_APP_PID") or 0)
+    except ValueError:
+        pid = 0
+    if pid <= 0:
+        return
+
+    def loop():
+        while True:
+            time.sleep(2)
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                log("la app %d ya no existe: cerrando el motor" % pid)
+                httpd.shutdown()
+                return
+            except PermissionError:
+                pass  # exists, owned by another user
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def serve(port=8765, open_browser=True, token=None):
     global HTTPD
     Handler.token = token or os.environ.get("RECOFIX_TOKEN") or secrets.token_urlsafe(16)
@@ -602,6 +625,7 @@ def serve(port=8765, open_browser=True, token=None):
     print("RecoFix escuchando en " + url, flush=True)
     if open_browser:
         subprocess.Popen(["open", url])
+    _watch_parent(httpd)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
