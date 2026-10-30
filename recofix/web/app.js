@@ -584,7 +584,7 @@ VIEWS.results = (v) => {
     if (["mp4", "mov", "m4v", "3gp"].includes(it.ext) && it.start >= 0 && !it.complete) {
       actions.append(h("button", { class: "small", onclick: () => reassembleDialog(it) }, "Reensamblar vídeo"));
     }
-    pv.replaceChildren(box, actions, it.note ? h("div", { class: "notice warn", style: { marginTop: "10px" } }, it.note) : null,
+    pv.replaceChildren(box, actions, it.note ? h("div", { class: "notice" + (/sobrescri|ceros|incomplet|no corresponde|falta|interrump/i.test(it.note) ? " warn" : ""), style: { marginTop: "10px" } }, it.note) : null,
       h("dl", { class: "kv" }, ...rows.flatMap(([k, val]) => [h("dt", {}, k), h("dd", { class: k === "Offset" ? "mono" : "" }, val)])));
     try {
       const r = await fetch(`/api/scan/${sc.id}/preview/${it.id}`, { headers: { "X-Token": TOKEN } });

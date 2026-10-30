@@ -11,6 +11,14 @@ Leyenda de confianza:
 * **Inferido** — deducción razonable a partir de lo observado; no verificado en ejecución.
 * **Desconocido** — no se pudo determinar con análisis estático.
 
+Los identificadores `ev_…` son registros de evidencia de la sesión REA (firma de
+`Recoverit` y Mach-O de `libscanopreator`). La exportación del ledger falló por
+tiempo de espera del proveedor, así que no se adjunta; la evidencia reproducible
+está en [`rea/drengsrv-protobuf.txt`](rea/drengsrv-protobuf.txt) (descriptores
+protobuf decodificados) y en los comandos citados en cada sección. Las búsquedas
+de cadenas/clases con el proveedor profundo de REA superaron el tiempo límite en
+binarios de >10 MB; esa parte se hizo con `strings`/`nm` sobre los mismos archivos.
+
 ## 1. Identidad del artefacto
 
 | Dato | Valor | Fuente |
