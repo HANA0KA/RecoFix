@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
         // `do shell script` returns only when every process holding its stdin/stdout/stderr has exited,
         // so the engine must be the only backgrounded command and must have all three redirected.
-        let cmd = "cd \(shellQuote(resources)); nohup env PYTHONDONTWRITEBYTECODE=1 RECOFIX_APP_PID=\(getpid()) RECOFIX_TOKEN=\(token) SUDO_USER=\(shellQuote(user)) SUDO_UID=\(uid) " +
+        let cmd = "cd \(shellQuote(resources)); env PYTHONDONTWRITEBYTECODE=1 RECOFIX_APP_PID=\(getpid()) RECOFIX_TOKEN=\(token) SUDO_USER=\(shellQuote(user)) SUDO_UID=\(uid) " +
             "SUDO_GID=\(gid) HOME=\(shellQuote(NSHomeDirectory())) PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin " +
             "\(python()) -m recofix serve --port \(port) --no-browser < /dev/null > \(shellQuote(logDir + "/engine.log")) 2>&1 &"
         let script = "do shell script \"\(cmd.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\" " +
