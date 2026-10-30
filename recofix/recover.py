@@ -117,7 +117,8 @@ class Recovery:
 
     def status(self):
         el = (self.finished or time.time()) - self.started
-        return {"done_bytes": self.done, "total_bytes": self.total, "current": self.current,
+        phase = "terminado" if self.finished and not self.error else "error" if self.error else "recuperando"
+        return {"phase": phase, "done_bytes": self.done, "total_bytes": self.total, "current": self.current,
                 "progress": self.done / self.total if self.total else 1.0, "results": self.results[-200:],
                 "count": len(self.results), "error": self.error, "done": self.finished is not None,
                 "speed": self.done / el if el > 0 else 0, "dest": self.dest}

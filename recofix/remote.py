@@ -140,7 +140,7 @@ class RemoteImager:
         try:
             env, args = self.ssh._env_and_args(tmp)
             dev = shlex.quote(self.device)
-            cmd = "dd if=%s bs=4M conv=noerror,sync status=none" % dev
+            cmd = "dd if=%s bs=4194304 conv=noerror,sync 2>/dev/null" % dev  # portable: GNU and BSD dd
             data = None
             if self.ssh.user != "root":
                 cmd = "sudo -S -p '' %s" % cmd
@@ -157,6 +157,9 @@ class RemoteImager:
                         break
                     w.write(b)
                     self.done += len(b)
+                if self.size and self.done > self.size:
+                    w.truncate(self.size)  # conv=sync pads the last block; the image must match the device
+                    self.done = self.size
             if self.cancel.is_set():
                 self.proc.kill()
             rc = self.proc.wait(timeout=30)

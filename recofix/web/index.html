@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RecoFix</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="brand">
+      <img src="/static/icon.svg" alt="" width="28" height="28">
+      <div><b>RecoFix</b><small id="ver">Recuperación de datos</small></div>
+    </div>
+    <nav id="nav"></nav>
+    <div id="envbox"></div>
+  </aside>
+  <main id="main">
+    <header id="top">
+      <div id="crumbs"></div>
+      <div class="spacer"></div>
+      <button id="jobsbtn" class="ghost" title="Tareas en curso">Tareas <span id="jobscount" class="pill">0</span></button>
+    </header>
+    <section id="view"></section>
+  </main>
+</div>
+<div id="jobs" class="drawer hidden"></div>
+<div id="modal" class="hidden"></div>
+<div id="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
