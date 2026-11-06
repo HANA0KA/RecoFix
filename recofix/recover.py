@@ -19,6 +19,32 @@ class UnsafeDestination(Exception):
     pass
 
 
+class NoSpace(Exception):
+    pass
+
+
+def free_space(path):
+    """Free bytes on the volume that holds ``path`` (or its nearest existing parent); None if unknown."""
+    p = os.path.realpath(path)
+    while p and not os.path.exists(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            return None
+        p = parent
+    try:
+        return shutil.disk_usage(p).free
+    except OSError:
+        return None
+
+
+def check_space(dest, needed):
+    """Refuse to start a copy that cannot fit: a half-written clip is worse than a clear message."""
+    free = free_space(dest)
+    if free is not None and needed > free - (64 << 20):
+        raise NoSpace("No hay espacio suficiente en el destino: se necesitan %.1f GB y hay %.1f GB libres. "
+                      "Libera espacio o elige otro disco." % (needed / 1e9, free / 1e9))
+
+
 def whole_disk_of(path):
     """BSD whole-disk name (disk5) that holds ``path`` (device node or mounted path)."""
     p = os.path.realpath(path)
@@ -97,6 +123,22 @@ def xxh64_file(path):
     return out[0] if out else None
 
 
+def _mhl_check(res, expected, path):
+    """Compare a written file with the MHL record it should match: "OK", "distinto" or "no verificable"."""
+    algo = expected["algo"]
+    got = None
+    if algo in ("xxhash64be", "xxhash64", "xxh64"):
+        got = res.get("xxh64")
+    elif algo == "md5":
+        got = res.get("md5")
+    if got is None:
+        from . import mhl  # imported here: mhl itself imports this module
+        got = mhl.file_hash(path, algo)
+    if got is None:
+        return "no verificable"
+    return "OK" if got.lower() == expected["hash"].lower() else "distinto"
+
+
 class Recovery:
     def __init__(self, source, items, dest, finalize_mxf=True, hashes=True, keep_structure=True, log=None):
         self.source = source
@@ -126,6 +168,7 @@ class Recovery:
     def run(self):
         try:
             check_destination(self.source, self.dest)
+            check_space(self.dest, self.total)
             os.makedirs(self.dest, exist_ok=True)
             with Source(self.source) as src:
                 for it in self.items:
@@ -133,7 +176,7 @@ class Recovery:
                         break
                     self.results.append(self._one(src, it))
             self._report()
-        except UnsafeDestination as e:
+        except (UnsafeDestination, NoSpace) as e:
             self.error = str(e)
         except Exception as e:
             import traceback
@@ -143,7 +186,8 @@ class Recovery:
             self.finished = time.time()
 
     def _target(self, it):
-        group = {"existing": "Existentes", "deleted": "Borrados", "orphan": "Huerfanos", "raw": "Sin_nombre_RAW"}[it.group]
+        group = {"existing": "Existentes", "deleted": "Borrados", "orphan": "Huerfanos", "raw": "Sin_nombre_RAW",
+                 "zeroed": "Rescatados_MHL"}[it.group]
         if it.path and self.keep_structure:
             parts = [_safe(p) for p in it.path.strip("/").split("/")]
             path = os.path.join(self.dest, group, *parts)
@@ -190,13 +234,32 @@ class Recovery:
                 x = xxh64_file(out)
                 if x:
                     res["xxh64"] = x
+            expected = it.meta.get("mhl") if it.meta else None
+            if expected:
+                res["mhl"] = _mhl_check(res, expected, out)
+                if res["mhl"] == "distinto":
+                    res["ok"] = False
+                    res["note"] = "el hash no coincide con el MHL: la copia está incompleta o dañada (se conserva para inspección)"
+                    if it.group == "zeroed":
+                        # never leave an unverified rescue under the clip's real name: it would pass for a good copy
+                        base, ext = os.path.splitext(out)
+                        marked = _unique(base + "_NO_VERIFICADO" + ext)
+                        os.rename(out, marked)
+                        out = res["path"] = marked
+                        res["note"] += "; renombrada como _NO_VERIFICADO"
+                elif res["mhl"] == "OK":
+                    res["note"] = "verificado con el MHL (%s)" % expected["algo"]
+                res["estado"] = {"OK": "verificado", "distinto": "no_verificado"}.get(res["mhl"], "sin_comprobar")
+            else:
+                res["estado"] = "sin_mhl" if it.group == "zeroed" else ("copiado" if res["ok"] else "incompleto")
             if it.ext == "mxf" and self.finalize_mxf and mxf.needs_finalize(out):
                 fixed = _unique(out[:-4] + "_reparado.mxf")
                 shutil.copyfile(out, fixed)
                 rep = mxf.finalize(fixed)
                 _chown(fixed)
                 res["mxf_reparado"] = fixed
-                res["note"] = "MXF sin footer: copia reparada creada (datos válidos %d bytes)" % rep.get("datos_validos", 0)
+                extra = "MXF sin footer: copia reparada creada (datos válidos %d bytes)" % rep.get("datos_validos", 0)
+                res["note"] = (res["note"] + "; " if res["note"] else "") + extra
             if src.bad_ranges:
                 res["note"] = (res["note"] + "; " if res["note"] else "") + \
                     "%d sectores ilegibles rellenados con ceros en el medio" % len(src.bad_ranges)
@@ -214,10 +277,10 @@ class Recovery:
         cpath = os.path.join(self.dest, "informe_recuperacion_%s.csv" % stamp)
         with open(cpath, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["ok", "nombre", "ruta", "bytes", "offset_origen", "md5", "xxh64", "nota"])
+            w.writerow(["ok", "estado", "nombre", "ruta", "bytes", "offset_origen", "md5", "xxh64", "nota"])
             for r in self.results:
-                w.writerow([r["ok"], r["name"], r["path"], r["size"], r["source_offset"], r.get("md5", ""),
-                            r.get("xxh64", ""), r["note"]])
+                w.writerow([r["ok"], r.get("estado", ""), r["name"], r["path"], r["size"], r["source_offset"],
+                            r.get("md5", ""), r.get("xxh64", ""), r["note"]])
         _chown(jpath)
         _chown(cpath)
         self.report = jpath

@@ -226,6 +226,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .dlg footer { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
 .fb { display: flex; flex-direction: column; gap: 2px; min-height: 300px; }
 .fb .e { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.fb .e svg { width: 16px; height: 16px; flex: none; opacity: .8; }
 .fb .e:hover { background: var(--panel-2); }
 .fb .e.sel { background: var(--accent-soft); }
 .drawer { position: fixed; right: 14px; top: 56px; width: 380px; max-height: 70vh; overflow: auto; background: var(--panel);
@@ -242,3 +243,35 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 @keyframes sp { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (max-width: 1100px) { .results { grid-template-columns: 210px 1fr; } .preview { display: none; } }
+
+/* ---------------------------------------------------------------- rescue of emptied clips */
+.zstep { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+.zstep:first-of-type { border-top: 0; }
+.znum { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.zbody h3 { margin: 4px 0 10px; font-size: 15px; }
+.zdiag { display: grid; gap: 8px; }
+.ztable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ztable th { text-align: left; color: var(--muted); font-weight: 500; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.ztable td { padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.ztable .num, .ztable th.num { text-align: right; }
+.zadv { margin-top: 10px; color: var(--muted); }
+.zadv summary { cursor: pointer; }
+.zstages { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.zstage { padding: 2px 10px; border-radius: 20px; border: 1px solid var(--line-2); color: var(--faint, var(--muted)); font-size: 12px; }
+.zstage.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.zstage.done { border-color: rgba(60, 207, 142, .35); color: var(--ok); }
+.zlogbox { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.zlogbox summary { cursor: pointer; padding: 6px 10px; color: var(--muted); font-size: 12px; }
+.zlog { max-height: 220px; overflow: auto; padding: 6px 10px 8px; font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; }
+.zlog .ev.warn { color: var(--warn); }
+.zlog .ev.error { color: var(--bad); }
+.zlog .ev.ok { color: var(--ok); }
+.zcard { margin-top: 8px; padding: 10px 12px; border: 1px solid rgba(255, 100, 100, .3); border-radius: 9px; background: var(--panel-2); display: grid; gap: 5px; }
+.zhead { display: flex; align-items: center; gap: 6px; }
+.zhead .tag { margin-left: auto; }
+.zwhy { color: var(--muted); }
+.zfix { color: var(--text, inherit); }
+.zcard button { justify-self: start; margin-top: 4px; }
+.scanbar:has(.zlogbox) { flex-wrap: wrap; max-height: 60vh; overflow: auto; align-items: flex-start; }
+.scanbar:has(.zlogbox) .prog { flex: 1 1 100%; order: 2; }
+.scanbar:has(.zlogbox) .stat, .scanbar:has(.zlogbox) > button { order: 1; }

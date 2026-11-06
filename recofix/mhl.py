@@ -5,11 +5,14 @@ recovered they are the ground truth for whether a clip came back intact.
 """
 import hashlib
 import os
+import re
 import xml.etree.ElementTree as ET
 
 from .recover import xxh64_file
 
-ALGOS = ("xxhash64be", "xxhash64", "xxh64", "xxh3", "md5", "sha1", "c4")
+ALGOS = ("xxhash64be", "xxhash64", "xxh64", "xxh3", "md5", "sha1", "sha256", "c4")
+LIST_EXTS = (".mhl", ".md5", ".sha1", ".sha256", ".xxh", ".xxh64", ".xxhash")
+HEX_ALGO = {32: "md5", 40: "sha1", 64: "sha256", 16: "xxhash64"}
 
 
 def _local(tag):
@@ -17,17 +20,18 @@ def _local(tag):
 
 
 def parse(path_or_bytes):
-    """Return [{"file": basename, "size": int|None, "algo": str, "hash": str}]."""
+    """Return [{"file": basename, "path": path as written in the MHL, "size": int|None, "algo": str, "hash": str}]."""
     root = ET.fromstring(path_or_bytes) if isinstance(path_or_bytes, bytes) else ET.parse(path_or_bytes).getroot()
     out = []
     for h in root.iter():
         if _local(h.tag) != "hash":
             continue
-        rec = {"file": None, "size": None, "algo": None, "hash": None}
+        rec = {"file": None, "path": "", "size": None, "algo": None, "hash": None}
         for c in h:
             t = _local(c.tag)
             if t in ("file", "path"):
-                rec["file"] = os.path.basename((c.text or "").strip())
+                rec["path"] = (c.text or "").strip()
+                rec["file"] = os.path.basename(rec["path"])
                 if c.get("size"):
                     rec["size"] = int(c.get("size"))
             elif t == "size":
@@ -39,10 +43,47 @@ def parse(path_or_bytes):
     return out
 
 
+_LINE = re.compile(r"^\s*([0-9a-fA-F]{16,64})\s+[*\s]?(.+?)\s*$")
+_BSD = re.compile(r"^\s*(MD5|SHA1|SHA256|XXH64)\s*\((.+)\)\s*=\s*([0-9a-fA-F]{16,64})\s*$", re.I)
+
+
+def parse_list(text):
+    """Plain checksum lists (md5sum / shasum / xxhsum output, ``.md5`` files, BSD ``MD5 (file) = hash``).
+
+    These carry no sizes, so a clip can only be recognised by its hash. Returns the same rows as ``parse``.
+    """
+    out = []
+    for line in text.splitlines():
+        m = _BSD.match(line)
+        if m:
+            name, h = m.group(2), m.group(3)
+        else:
+            m = _LINE.match(line)
+            if not m:
+                continue
+            h, name = m.group(1), m.group(2)
+        algo = HEX_ALGO.get(len(h))
+        if algo and name:
+            out.append({"file": os.path.basename(name.strip()), "path": name.strip(), "size": None, "algo": algo, "hash": h.lower()})
+    return out
+
+
+def parse_any(path_or_bytes):
+    """Read a hash manifest of any supported kind: ASC MHL / legacy MHL (XML) or a plain checksum list."""
+    if isinstance(path_or_bytes, bytes):
+        data = path_or_bytes
+    else:
+        with open(path_or_bytes, "rb") as f:
+            data = f.read()
+    if data.lstrip()[:5] == b"<?xml" or data.lstrip()[:1] == b"<":
+        return parse(data)
+    return parse_list(data.decode("utf-8", "replace"))
+
+
 def file_hash(path, algo):
     if algo in ("xxhash64be", "xxhash64", "xxh64"):
         return xxh64_file(path)
-    if algo in ("md5", "sha1"):
+    if algo in ("md5", "sha1", "sha256"):
         h = hashlib.new(algo)
         with open(path, "rb") as f:
             for b in iter(lambda: f.read(8 << 20), b""):

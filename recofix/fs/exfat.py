@@ -91,6 +91,49 @@ class ExFAT:
     def cl_off(self, c):
         return self.heap + (c - 2) * self.cs
 
+    def cluster_of(self, off):
+        """Cluster number that holds the absolute byte offset ``off``."""
+        return 2 + (off - self.heap) // self.cs
+
+    def load_bitmap(self):
+        """Allocation bitmap (one bit per cluster, bit 0 = cluster 2), or None if it cannot be read."""
+        if self.bitmap is not None:
+            return self.bitmap or None
+        self.bitmap = b""
+        try:
+            root = self.read_dir(self.root, 0, False)
+            for i in range(0, len(root), 32):
+                t = root[i]
+                if t == 0:
+                    break
+                if t != 0x81:
+                    continue
+                first = struct.unpack_from("<I", root, i + 20)[0]
+                length = struct.unpack_from("<Q", root, i + 24)[0]
+                need = -(-length // self.cs)
+                if not 2 <= first < self.n_clusters + 2 or not 0 < length <= (self.n_clusters + 7) // 8 + self.cs:
+                    break
+                chain = self.fat_chain(first, need)
+                if len(chain) < need:  # FAT chain missing: the bitmap is written contiguously by every formatter
+                    chain = list(range(first, first + need))
+                data = b"".join(self.src.read(self.cl_off(c), self.cs) for c in chain)[:length]
+                if len(data) * 8 >= self.n_clusters:
+                    self.bitmap = data
+                break
+        except Exception:
+            self.bitmap = b""
+        return self.bitmap or None
+
+    def allocated_count(self, first, n):
+        """How many of the ``n`` clusters starting at ``first`` the bitmap marks as in use (None if no bitmap)."""
+        bm = self.load_bitmap()
+        if bm is None or n <= 0:
+            return None
+        lo = first - 2
+        b0, b1 = lo >> 3, (lo + n + 7) >> 3
+        bits = int.from_bytes(bm[b0:b1], "little") >> (lo & 7)
+        return bin(bits & ((1 << n) - 1)).count("1")
+
     def fat_chain(self, first, limit):
         out, c = [], first
         fat = self.base + self.fat_off * self.bps
@@ -98,6 +141,86 @@ class ExFAT:
             out.append(c)
             c = struct.unpack("<I", self.src.read(fat + c * 4, 4))[0]
         return out
+
+    FAT_BLOCK = 1 << 14  # FAT entries read at once (64 KiB): a 30 GB clip walks its chain in a few hundred reads
+
+    def _fat_entry(self, c):
+        k = c >> 14
+        blocks = self.__dict__.setdefault("_fat_blocks", {})
+        blk = blocks.get(k)
+        if blk is None:
+            if len(blocks) > 256:
+                blocks.clear()
+            raw = self.src.read(self.base + self.fat_off * self.bps + (k << 14) * 4, 4 << 14)
+            blk = blocks[k] = struct.unpack("<%dI" % (len(raw) // 4), raw[:len(raw) // 4 * 4])
+        i = c & 0x3FFF
+        return blk[i] if i < len(blk) else 0
+
+    def chain_runs(self, first, need):
+        """Layout of a file as ``[(cluster, count)]`` runs, following the FAT chain that deletion leaves behind.
+
+        Exactly what recovered every fragmented clip by hand: an entry of 0 means "the next cluster" (contiguous
+        file, no chain was ever written); an end-of-chain mark before ``need`` clusters is reported in ``issues``
+        and read on contiguously. Returns ``(runs, issues)`` where ``issues`` is a list of human-readable problems.
+        """
+        runs, issues, x, got = [], [], first, 0
+        limit = self.n_clusters + 2
+        while got < need:
+            if x < 2 or x >= limit:
+                issues.append("la cadena FAT apunta fuera del volumen (cluster %d tras %d de %d)" % (x, got, need))
+                break
+            if runs and runs[-1][0] + runs[-1][1] == x:
+                runs[-1] = (runs[-1][0], runs[-1][1] + 1)
+            else:
+                runs.append((x, 1))
+            got += 1
+            if got >= need:
+                break
+            e = self._fat_entry(x)
+            if e == 0:
+                x += 1
+            elif e >= 0xFFFFFFF7:
+                issues.append("la cadena FAT termina en el cluster %d tras %d de %d" % (x, got, need))
+                x += 1
+            else:
+                x = e
+        return runs, issues
+
+    def is_used(self, c):
+        """True/False from the allocation bitmap, None when the bitmap is unreadable."""
+        bm = self.load_bitmap()
+        if bm is None or not 2 <= c < self.n_clusters + 2:
+            return None
+        k = c - 2
+        return bool(bm[k >> 3] >> (k & 7) & 1)
+
+    def used_in_runs(self, runs):
+        """Clusters of ``runs`` that the bitmap says belong to some file today; ``[(first, count)]`` or None."""
+        if self.load_bitmap() is None:
+            return None
+        out = []
+        for c0, n in runs:
+            start = None
+            for c in range(c0, c0 + n):
+                u = self.is_used(c)
+                if u and start is None:
+                    start = c
+                elif not u and start is not None:
+                    out.append((start, c - start))
+                    start = None
+            if start is not None:
+                out.append((start, c0 + n - start))
+        return out
+
+    def free_count(self):
+        """Free clusters according to the bitmap (None if unreadable)."""
+        bm = self.load_bitmap()
+        if bm is None:
+            return None
+        n = (self.n_clusters + 7) // 8
+        bits = int.from_bytes(bm[:n], "little") & ((1 << self.n_clusters) - 1)
+        used = bits.bit_count() if hasattr(int, "bit_count") else sum(bin(b).count("1") for b in bm[:n])
+        return self.n_clusters - used
 
     def extents(self, first, size, nofat, deleted):
         """Byte extents (absolute) for a stream; deleted chains are assumed contiguous."""

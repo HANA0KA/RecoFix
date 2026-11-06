@@ -27,6 +27,7 @@ Para la Papelera y Time Machine, concede «Acceso total al disco» a RecoFix o a
 | Discos duros y ubicaciones | Discos y ubicaciones | Rápido: árbol de exFAT/FAT/NTFS con borrados (nombre, carpeta, fecha). Profundo: firmas por sector con tamaño estructural de ~90 formatos. Escaneo de carpeta (`scan_path`). |
 | Papelera | Papelera | Papelera del usuario, `.Trashes` de cada volumen e iCloud Drive; restaura a la ubicación original leyendo `ptbL/ptbN` del `.DS_Store`. |
 | Tarjeta SD / perfiles de cámara | Tarjeta SD y cámaras | Detecta DCIM, PRIVATE/M4ROOT, CONTENTS, XDROOT, ARRI, RED, BRAW, GoPro, DJI, Insta360… y escanea con el perfil de la marca. |
+| — | Rescate de clips vaciados | Para **cualquier disco, tarjeta o imagen** donde archivos grabados completos aparecen con 0 bytes (o han desaparecido) pero sus datos siguen en el disco. Asistente en 4 pasos: origen → manifiesto de hashes → diagnóstico previo → rescate con registro detallado. **exFAT y FAT12/16/32**: usa la tabla de asignación (clusters libres, sobrescritos y la cadena FAT que queda tras el borrado, para reconstruir archivos **fragmentados**). **Cualquier otro sistema (NTFS, APFS, HFS+, ext…) o disco sin sistema legible**: búsqueda por bloques de cabecera. Cada archivo se reconoce con el manifiesto del rodaje o de la copia — MHL (ASC y 1.x), listas `.md5`/`.sha1`/`.sha256`/`.xxh64` (con o sin tamaño) — y se comprueba contra su hash. Cada archivo que no se puede rescatar explica por qué y qué hacer (añadir el manifiesto, buscar en todo el volumen, usar otra copia). |
 | Recuperación avanzada de vídeo | Vídeo avanzado | Reensambla MP4/MOV fragmentados: localiza cada fotograma de la tabla de muestras en el disco (H.264, HEVC, ProRes). |
 | Particiones perdidas | Particiones perdidas | Busca boot sectors/superbloques (exFAT, FAT, NTFS, APFS, HFS+, ext) en el espacio sin particionar y abre los volúmenes encontrados. |
 | Time Machine | Time Machine | Copias e instantáneas APFS locales: explorar, buscar y restaurar. |
@@ -59,6 +60,12 @@ python3 -m recofix repair-video clip_roto.mp4 --muestra clip_bueno.mp4
 ```
 
 ```bash
+sudo python3 -m recofix zeroed /dev/rdisk5s2 /Volumes/Backup/Recuperado
+```
+
+Sin `DESTINO` solo lista lo que encuentra. `--diagnostico` analiza el volumen y explica qué se puede rescatar sin buscar nada. `--mhl RUTA` (repetible) añade archivos o carpetas `.mhl`; `--todo-el-volumen` busca en todo el espacio libre; `--rango A-B` limita la búsqueda a un rango de clusters. Termina con código 1 si algún clip no se encontró o su hash no coincide.
+
+```bash
 sudo python3 -m recofix partitions /dev/rdisk4
 ```
 
@@ -79,7 +86,8 @@ recofix/
   modes/           ubicaciones, papelera (.DS_Store), cámaras, Time Machine
   imaging.py       imágenes de disco    remote.py  NAS/Linux por SSH
   smart.py         S.M.A.R.T.           rescue.py  kit de rescate
-  recover.py       escritura segura + informes      server.py  API local con token
+  zeroed.py        rescate de clips vaciados + MHL        recover.py  escritura segura + informes
+  server.py        API local con token
   web/             interfaz
 app/main.swift     app nativa (WKWebView) que arranca el motor como administrador
 ```
@@ -96,6 +104,14 @@ Generan clips reales con ffmpeg y volúmenes exFAT/FAT32 con `hdiutil` (borrados
 fragmentan vídeos en un disco simulado y comprueban que el reensamblado es idéntico bit a bit.
 
 ## Límites conocidos
+
+* Rescate de clips vaciados: cualquier disco, pero solo los formatos con reconocimiento de cabecera (MXF, MOV/MP4/BRAW, R3D, MKV, AVI/WAV, MPEG, fotos, audio, documentos…), y un archivo se reconstruye si sus datos no se sobrescribieron. Si archivos pequeños
+  (p. ej. `._*`) se escribieron encima de parte del clip, se avisa («clusters ocupados») y el hash del MHL no coincidirá:
+  la copia se conserva para inspección pero no se da por buena. Sin MHL no hay tamaño ni hash con que reconocer la
+  cabecera, y el clip se reporta como sin resolver en lugar de adivinarlo. Los clips que no coinciden con el hash se
+  guardan siempre como `<nombre>_NO_VERIFICADO.<ext>`, nunca con el nombre original. Si el espacio libre del disco está
+  a ceros (formato seguro, TRIM) los datos ya no existen y RecoFix lo indica. Sin tabla de asignación (NTFS, APFS, HFS+, ext, disco sin sistema) se asume que cada archivo está contiguo: uno fragmentado se reporta como no encontrado, no se adivina. La búsqueda por bloques recorre todo el volumen, así que en discos grandes conviene limitarla con un rango. El soporte NTFS/APFS/HFS+/ext está probado con discos sin sistema, no con imágenes reales de esos formatos; no reconstruye cabeceras a partir de
+  otros clips (un archivo así no coincidiría con el original y no sirve como copia de entrega).
 
 * APFS y HFS+ no se recorren como sistema de archivos: sus borrados se recuperan por escaneo profundo (sin nombre),
   o desde Time Machine / instantáneas.

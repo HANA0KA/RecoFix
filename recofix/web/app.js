@@ -91,7 +91,8 @@ const ICONS = {
 const ico = (k) => h("span", { html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.file}</svg>`, style: { display: "contents" } });
 
 const CAT = { video: "Vídeo", photo: "Foto", audio: "Audio", document: "Documento", archive: "Comprimido", other: "Otros", system: "Sistema" };
-const GROUP = { existing: "Existentes", deleted: "Borrados", orphan: "Huérfanos (tras formateo)", raw: "Sin nombre (RAW)" };
+const GROUP = { existing: "Existentes", deleted: "Borrados", orphan: "Huérfanos (tras formateo)", raw: "Sin nombre (RAW)",
+  zeroed: "Rescatados (MHL)" };
 
 // ---------------------------------------------------------------- navigation
 
@@ -102,6 +103,7 @@ const NAV = [
     ["trash", "Papelera", "trash"],
     ["sd", "Tarjeta SD y cámaras", "sd"],
     ["video", "Vídeo avanzado", "video"],
+    ["zeroed", "Rescate de clips vaciados", "rvideo"],
     ["partition", "Particiones perdidas", "part"],
     ["tm", "Time Machine", "tm"],
     ["icloud", "iCloud Drive", "cloud"],
@@ -248,6 +250,7 @@ VIEWS.home = (v) => {
     ["trash", "trash", "Papelera", "Archivos en la Papelera, con su ubicación original."],
     ["sd", "sd", "Tarjeta SD y cámaras", "Perfil automático por marca: Sony, Canon, ARRI, RED, DJI, GoPro…"],
     ["video", "video", "Vídeo avanzado", "Reensambla clips MP4/MOV fragmentados frame a frame."],
+    ["zeroed", "rvideo", "Rescate de clips vaciados", "Clips que figuran con 0 bytes pero siguen en el disco: se localizan con el MHL, se reconstruyen y se verifican con su hash."],
     ["partition", "part", "Particiones perdidas", "Encuentra volúmenes borrados o tablas de particiones dañadas."],
     ["tm", "tm", "Time Machine", "Copias y instantáneas locales: busca y restaura intacto."],
     ["nas", "nas", "NAS y Linux", "Conecta por SSH y recupera de discos remotos sin escribir en ellos."],
@@ -413,6 +416,186 @@ VIEWS.partition = (v) => {
     list, h("div", { class: "opts" }, h("label", { class: "chk" }, deep, "Añadir escaneo profundo"), h("span", { class: "spacer" }), startBtn)));
 };
 
+// ------------------------------------------------ rescue of emptied clips
+
+const ZNAME = "Rescate de clips vaciados";
+const ZSTAGES = [["leer", "Leer volumen"], ["mhl", "Leer MHL"], ["buscar", "Buscar cabeceras"], ["emparejar", "Emparejar y verificar"], ["fin", "Terminado"]];
+
+function zerosPlural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
+// Offer the remedy attached to an unresolved clip: add a MHL, or widen the search.
+function zeroedAction(u) {
+  const body = S.zeroedBody;
+  if (!body || !u.action) return null;
+  if (u.action === "add_mhl") {
+    const add = (mode, title, label) => h("button", { class: "small", onclick: async () => {
+      const p = await pickPath({ mode, show: "manifest", title, start: S.env.home });
+      if (p) startScan(Object.assign({}, body, { mhl: (body.mhl || []).concat([p]) }), "zeroed");
+    } }, label);
+    return h("div", { class: "row", style: { gap: "6px" } }, add("file", "Manifiesto de hashes (.mhl, .md5, .sha1, .sha256…)", "Añadir manifiesto y repetir"),
+      add("dir", "Carpeta con manifiestos de hashes", "Añadir carpeta de manifiestos y repetir"));
+  }
+  if (u.action === "search_all" && body.search !== "all") {
+    return h("button", { class: "small", onclick: () => startScan(Object.assign({}, body, { search: "all", range: null }), "zeroed") }, "Buscar en todo el volumen");
+  }
+  return null;
+}
+
+function zeroedCard(u) {
+  return h("div", { class: "zcard", title: u.path },
+    h("div", { class: "zhead" }, h("b", {}, u.name), u.size ? h("span", { class: "faint" }, " · " + fmtB(u.size)) : null,
+      h("span", { class: "tag bad" }, "sin recuperar")),
+    h("div", { class: "zwhy" }, u.reason),
+    u.fix ? h("div", { class: "zfix" }, h("b", {}, "Qué hacer: "), u.fix) : null,
+    zeroedAction(u));
+}
+
+function renderZeroed(box, st) {
+  const z = st.zeroed;
+  if (!box._z) {
+    const stages = h("div", { class: "zstages" });
+    const info = h("div", { class: "muted", style: { marginTop: "6px" } });
+    const logBody = h("div", { class: "zlog mono" });
+    const log = h("details", { class: "zlogbox", open: true }, h("summary", {}, "Registro detallado del proceso"), logBody);
+    const result = h("div");
+    box.replaceChildren(stages, info, log, result);
+    box._z = { stages, info, logBody, log, result, total: -1, stick: true };
+    logBody.addEventListener("scroll", () => { box._z.stick = logBody.scrollTop + logBody.clientHeight >= logBody.scrollHeight - 8; });
+  }
+  const P = box._z;
+  const cur = ZSTAGES.findIndex((x) => x[0] === z.stage);
+  P.stages.replaceChildren(...ZSTAGES.map(([k, label], i) => h("span", { class: "zstage" + (i < cur || st.done ? " done" : i === cur ? " on" : "") },
+    (i < cur || st.done ? "✓ " : i === cur ? "● " : "") + label)));
+  const vol = (z.volumes || [])[0];
+  P.info.replaceChildren(...[
+    vol ? `Volumen «${vol.label || "sin nombre"}» (${vol.fstype === "?" ? "sin sistema de archivos reconocido" : vol.fstype.toUpperCase()}) · ${vol.files} archivos · ${vol.mode === "bloques" ? "bloques" : "clusters"} de ${fmtB(vol.cluster_size)}${vol.bitmap ? " · " + fmtB(vol.free_clusters * vol.cluster_size) + " libres" : ""}` : "",
+    z.mhl_files.length ? ` · ${zerosPlural(z.mhl_files.length, "manifiesto leído", "manifiestos leídos")} (${z.mhl_files.reduce((a, m) => a + m.entries, 0)} entradas)` : "",
+    z.range ? ` · rango de clusters ${z.range[0]}–${z.range[1]}` : z.search === "all" ? " · búsqueda en todo el volumen" : z.search === "near" ? " · búsqueda junto a los demás archivos" : "",
+  ].filter(Boolean));
+  if (P.total !== z.events_total) {
+    P.total = z.events_total;
+    P.logBody.replaceChildren(...z.events.map((e) => h("div", { class: "ev " + e.level }, h("span", { class: "faint" }, String(e.t).padStart(6) + "s "), e.msg)));
+    if (P.stick) P.logBody.scrollTop = P.logBody.scrollHeight;
+  }
+  const kids = [];
+  z.mhl_errors.forEach((e) => kids.push(h("div", { class: "notice warn", style: { marginTop: "6px" } }, "Manifiesto ilegible: " + e)));
+  if (!z.xxhsum && st.done) kids.push(h("div", { class: "notice warn", style: { marginTop: "6px" } }, "xxhsum no está instalado: los clips con hash xxHash64 no se pueden comprobar. Instálalo con «brew install xxhash»."));
+  if (st.done && !st.error) {
+    P.log.open = z.unresolved.length > 0 || !z.resolved;
+    if (z.summary) kids.push(h("div", { class: "notice", style: { marginTop: "6px" } }, z.summary));
+    else if (z.resolved) kids.push(h("div", { class: "notice " + (z.unresolved.length ? "warn" : "ok"), style: { marginTop: "8px" } },
+      h("b", {}, `${z.resolved} de ${z.targets} clips localizados. `),
+      "Siguiente paso: marca los clips del grupo «Rescatados (MHL)» en la lista y pulsa Recuperar, eligiendo OTRO disco como destino. " +
+      "Cada clip se vuelve a comprobar contra el hash del MHL al copiarlo; el que no coincida se guarda como «_NO_VERIFICADO» para que no pase por una copia buena."));
+    if (z.survey && z.survey.sampled) kids.push(h("div", { class: "muted", style: { marginTop: "6px" } },
+      `Comprobación del espacio libre: ${z.survey.data} de ${z.survey.sampled} muestras con datos, ${z.survey.zeros} a ceros.`));
+  }
+  z.unresolved.forEach((u) => kids.push(zeroedCard(u)));
+  P.result.replaceChildren(...kids);
+}
+
+function renderPreflight(box, d, onStart) {
+  const kind = { listo: "ok", parcial: "warn", sin_mhl: "warn", nada: "", error: "bad" }[d.verdict] || "";
+  const kids = [h("div", { class: "notice " + kind }, d.advice || "")];
+  if (d.volume) kids.push(h("div", { class: "muted", style: { marginTop: "8px" } },
+    `Volumen «${d.volume.label || "sin nombre"}» (${d.volume.fstype === "?" ? "sin sistema de archivos reconocido" : d.volume.fstype.toUpperCase()}) · ${d.volume.files} archivos · ${d.volume.mode === "bloques" ? "búsqueda por bloques" : "clusters de " + fmtB(d.volume.cluster_size)}` +
+    (d.volume.free_bytes != null ? ` · ${fmtB(d.volume.free_bytes)} libres` : "") +
+    ` · ${zerosPlural(d.mhl_files.length, "manifiesto leído", "manifiestos leídos")}`));
+  d.mhl_errors.forEach((e) => kids.push(h("div", { class: "notice warn", style: { marginTop: "6px" } }, "Manifiesto ilegible: " + e)));
+  if (d.targets.length) {
+    kids.push(h("table", { class: "ztable" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Archivo a rescatar"), h("th", {}, "Carpeta"), h("th", { class: "num" }, "Tamaño esperado"), h("th", {}, "MHL"))),
+      h("tbody", {}, ...d.targets.slice(0, 200).map((t) => h("tr", {},
+        h("td", { class: "name" }, t.name), h("td", { class: "muted", title: t.folder }, t.folder.split("/").slice(-2).join("/")),
+        h("td", { class: "num" }, t.size ? fmtB(t.size) : "—"),
+        h("td", {}, t.has_mhl ? h("span", { class: "tag ok", title: t.hash_only ? "El manifiesto no trae tamaño: se reconoce solo por su hash" : "" }, "✓ " + t.algo + (t.hash_only ? " · solo hash" : "")) : h("span", { class: "tag bad" }, "falta"),
+          t.absent ? h("span", { class: "tag warn", style: { marginLeft: "4px" }, title: "Figura en el manifiesto pero no en el disco" }, "ausente") : null))))));
+    if (d.targets.length > 200) kids.push(h("div", { class: "muted" }, `… y ${d.targets.length - 200} más`));
+  }
+  d.unresolved.forEach((u) => kids.push(zeroedCardPre(u)));
+  d.warnings.forEach((w) => kids.push(h("div", { class: "notice warn", style: { marginTop: "6px" } }, w)));
+  box.replaceChildren(...kids);
+}
+
+function zeroedCardPre(u) {
+  return h("div", { class: "zcard" }, h("div", { class: "zhead" }, h("b", {}, u.name)), h("div", { class: "zwhy" }, u.reason),
+    u.fix ? h("div", { class: "zfix" }, h("b", {}, "Qué hacer: "), u.fix) : null);
+}
+
+VIEWS.zeroed = (v) => {
+  let target = null, wide = false, pre = null, busy = false;
+  const extra = [];
+  const list = h("div", { class: "grid", style: { gridTemplateColumns: "repeat(auto-fill,minmax(340px,1fr))" } });
+  const mhlBox = h("div", { class: "chips" });
+  const diag = h("div", { class: "zdiag" }, h("div", { class: "muted" }, "Elige primero el disco o volumen de arriba."));
+  const chosen = h("span", { class: "muted" }, "Elige un disco, un volumen o una imagen de disco");
+  const startBtn = h("button", { class: "primary", disabled: true }, "Iniciar el rescate");
+  const missingChk = h("input", { type: "checkbox", onchange: () => analyze() });
+  const rFrom = h("input", { type: "number", min: 2, placeholder: "cluster inicial", style: { width: "130px" } });
+  const rTo = h("input", { type: "number", min: 2, placeholder: "cluster final", style: { width: "130px" } });
+
+  const analyze = async () => {
+    if (!target || busy) return;
+    busy = true; pre = null; startBtn.disabled = true;
+    diag.replaceChildren(h("div", { class: "muted" }, h("span", { class: "spin" }), " Analizando el volumen (solo lectura)…"));
+    try {
+      pre = await api("zeroed/preflight", { path: target.path, mhl: extra, include_missing: missingChk.checked });
+      renderPreflight(diag, pre);
+      startBtn.disabled = !["listo", "parcial"].includes(pre.verdict);
+    } catch (e) { diag.replaceChildren(h("div", { class: "notice bad" }, e.message)); }
+    busy = false;
+  };
+  const drawMhl = () => {
+    mhlBox.replaceChildren(...extra.map((p) => h("span", { class: "chip on", title: p + " · clic para quitar",
+      onclick: () => { extra.splice(extra.indexOf(p), 1); drawMhl(); analyze(); } }, p.split("/").pop() + " ✕")));
+  };
+  const addMhl = async (mode, title) => {
+    const p = await pickPath({ mode, show: "manifest", title, start: S.env.home });
+    if (p && !extra.includes(p)) { extra.push(p); drawMhl(); analyze(); }
+  };
+  const seg = h("div", { class: "seg" },
+    h("button", { class: "on", onclick: () => { wide = false; seg.children[0].className = "on"; seg.children[1].className = ""; } }, "Junto a los demás archivos (rápido)"),
+    h("button", { onclick: () => { wide = true; seg.children[1].className = "on"; seg.children[0].className = ""; } }, "Todo el volumen (lento)"));
+  startBtn.addEventListener("click", () => {
+    const body = { path: target.path, label: ZNAME + " · " + target.label, mode: "zeroed", mhl: extra, search: wide ? "all" : "near", include_missing: missingChk.checked };
+    const a = parseInt(rFrom.value, 10), b = parseInt(rTo.value, 10);
+    if (rFrom.value || rTo.value) {
+      if (!(a >= 2 && b >= a)) { toast("Rango de clusters no válido: indica inicio y fin (el fin no puede ser menor que el inicio).", "bad"); return; }
+      body.range = [a, b];
+    }
+    S.zeroedBody = body;
+    startScan(body, "zeroed");
+  });
+  const select = (t) => {
+    target = t;
+    chosen.replaceChildren(h("b", {}, t.label));
+    analyze();
+  };
+  diskPicker(list, { onSelect: select });
+  const openImage = h("button", { onclick: async () => {
+    const p = await pickPath({ mode: "file", show: "images", title: "Imagen de disco (.img, .dd, .raw, .dmg)" });
+    if (p) select({ path: p, label: p.split("/").pop() });
+  } }, "Abrir imagen de disco…");
+  const step = (n, title, ...body) => h("section", { class: "zstep" }, h("div", { class: "znum" }, String(n)), h("div", { class: "zbody" }, h("h3", {}, title), ...body));
+
+  v.append(page(ZNAME,
+    "Para cualquier disco, tarjeta o imagen donde archivos que se grabaron completos aparecen con 0 bytes, o han desaparecido, pero sus datos siguen en el disco " +
+    "(entrada del directorio reiniciada, copia interrumpida, volumen dañado). Funciona con exFAT y FAT12/16/32 usando su tabla de asignación (incluidos los archivos fragmentados) " +
+    "y con cualquier otro sistema, o sin sistema legible, buscando por bloques. Cada archivo se reconoce con el manifiesto de hashes del rodaje o de la copia " +
+    "(MHL, .md5, .sha1, .sha256, .xxh64) y se comprueba contra ese hash. El disco de origen solo se lee: nunca se escribe en él.",
+    step(1, "Elige el disco o volumen dañado", list, h("div", { class: "row", style: { marginTop: "10px" } }, openImage, chosen)),
+    step(2, "Manifiesto de hashes", h("div", { class: "muted" }, "RecoFix usa los manifiestos (.mhl, .md5, .sha1, .sha256…) que hay en el propio volumen. Si están en otro sitio (otro disco, carpeta de entrega), añádelos aquí. Sin manifiesto no hay forma de reconocer un archivo."),
+      h("div", { class: "row", style: { marginTop: "8px" } }, h("button", { class: "small", onclick: () => addMhl("file", "Manifiesto de hashes (.mhl, .md5, .sha1, .sha256…)") }, "Añadir manifiesto…"),
+        h("button", { class: "small", onclick: () => addMhl("dir", "Carpeta con manifiestos de hashes") }, "Añadir carpeta…"), mhlBox),
+      h("label", { class: "chk", style: { marginTop: "10px" } }, missingChk, "Buscar también los archivos del manifiesto que no aparecen en el disco (perdidos, no solo vacíos)")),
+    step(3, "Diagnóstico previo", diag, h("div", { class: "row", style: { marginTop: "8px" } }, h("button", { class: "small", onclick: analyze }, "Analizar de nuevo"))),
+    step(4, "Rescate", h("div", { class: "col", style: { gap: "6px" } }, h("small", { class: "muted" }, "Dónde buscar los datos (en volúmenes sin tabla de asignación siempre se recorre todo)"), seg),
+      h("details", { class: "zadv" }, h("summary", {}, "Opciones avanzadas: limitar a un rango de clusters o bloques"),
+        h("div", { class: "row", style: { margin: "8px 0" } }, rFrom, "–", rTo,
+          h("span", { class: "muted" }, "Útil si ya sabes en qué zona del disco están los archivos (p. ej. de una ejecución anterior)."))),
+      h("div", { class: "opts" }, h("span", { class: "spacer" }), startBtn))));
+};
+
 // ------------------------------------------------ results
 
 function openScan(id) {
@@ -432,8 +615,9 @@ VIEWS.results = (v) => {
   const saveBtn = h("button", { onclick: async () => { try { const r = await api("scan/" + sc.id + "/save", {}); toast("Guardado en " + r.path, "ok"); } catch (e) { toast(e.message, "bad"); } } }, "Guardar escaneo");
   const title = h("b", {}, "Escaneo");
   const lost = h("div");
+  const zbox = h("div");
   const scanbar = h("div", { class: "scanbar" },
-    h("div", { class: "prog" }, h("div", { class: "row" }, title, phase), h("div", { class: "bar", style: { marginTop: "6px" } }, bar), lost),
+    h("div", { class: "prog" }, h("div", { class: "row" }, title, phase), h("div", { class: "bar", style: { marginTop: "6px" } }, bar), lost, zbox),
     h("div", { class: "stat" }, statFound, h("small", {}, "encontrados")), h("div", { class: "stat" }, statSpeed, h("small", {}, "velocidad")),
     h("div", { class: "stat" }, statEta, h("small", {}, "restante")), h("div", { class: "stat" }, statBad, h("small", {}, "sectores ilegibles")),
     pauseBtn, stopBtn, saveBtn);
@@ -567,7 +751,7 @@ VIEWS.results = (v) => {
     updateFooter();
   }
   function statusTags(it) {
-    const t = [h("span", { class: "tag " + (it.group === "existing" ? "" : it.group === "raw" ? "info" : "warn") }, GROUP[it.group].split(" ")[0])];
+    const t = [h("span", { class: "tag " + (it.group === "existing" ? "" : it.group === "raw" ? "info" : it.group === "zeroed" ? "acc" : "warn") }, GROUP[it.group].split(" ")[0])];
     if (!it.complete) t.push(h("span", { class: "tag bad" }, "incompleto"));
     if (it.fragments > 1) t.push(h("span", { class: "tag" }, it.fragments + " frag."));
     return t;
@@ -576,7 +760,8 @@ VIEWS.results = (v) => {
     sc.cur = it.id;
     table.querySelectorAll(".cur").forEach((x) => x.classList.remove("cur"));
     const box = h("div", { class: "pv" }, h("span", { class: "spin" }));
-    const meta = Object.entries(it.meta || {}).map(([k, val]) => [k, Array.isArray(val) ? val.join(", ") : String(val)]);
+    const meta = Object.entries(it.meta || {}).map(([k, val]) => [k, Array.isArray(val) ? val.join(", ")
+      : val && typeof val === "object" ? Object.entries(val).map(([a, b]) => `${a}: ${b}`).join(" · ") : String(val)]);
     const rows = [["Nombre", it.name], ["Tamaño", fmtB(it.size) + ` (${it.size} B)`], ["Origen", GROUP[it.group]], ["Fecha", it.mtime || "—"],
       ["Ruta", it.path || "—"], ["Offset", it.start >= 0 ? it.start : "—"], ["Fragmentos", it.fragments], ["Formato", it.fmt || it.ext], ["Sistema", it.fs || "—"], ...meta];
     const actions = h("div", { class: "row", style: { marginTop: "12px" } },
@@ -584,7 +769,7 @@ VIEWS.results = (v) => {
     if (["mp4", "mov", "m4v", "3gp"].includes(it.ext) && it.start >= 0 && !it.complete) {
       actions.append(h("button", { class: "small", onclick: () => reassembleDialog(it) }, "Reensamblar vídeo"));
     }
-    pv.replaceChildren(box, actions, it.note ? h("div", { class: "notice" + (/sobrescri|ceros|incomplet|no corresponde|falta|interrump/i.test(it.note) ? " warn" : ""), style: { marginTop: "10px" } }, it.note) : null,
+    pv.replaceChildren(box, actions, it.note ? h("div", { class: "notice" + (/sobrescri|ceros|incomplet|no corresponde|falta|interrump|hueco|no coincid/i.test(it.note) ? " warn" : ""), style: { marginTop: "10px" } }, it.note) : null,
       h("dl", { class: "kv" }, ...rows.flatMap(([k, val]) => [h("dt", {}, k), h("dd", { class: k === "Offset" ? "mono" : "" }, val)])));
     try {
       const r = await fetch(`/api/scan/${sc.id}/preview/${it.id}`, { headers: { "X-Token": TOKEN } });
@@ -638,6 +823,7 @@ VIEWS.results = (v) => {
     pauseBtn.disabled = stopBtn.disabled = st.done;
     lost.replaceChildren(...(st.lost_partitions || []).map((p) => h("span", { class: "tag acc", style: { marginTop: "6px", marginRight: "6px" } },
       `Partición perdida ${p.fstype.toUpperCase()} · ${fmtB(p.size)} @ ${fmtB(p.offset)}`)));
+    if (st.zeroed) renderZeroed(zbox, st);
     if (st.error) phase.replaceChildren(h("span", { style: { color: "var(--bad)" } }, " · " + st.error));
     if (st.found !== lastFound) {
       const first = lastFound < 0;
@@ -657,12 +843,19 @@ function recoverProgress(id, dest) {
   const close = modal("Recuperando", body, [h("button", { onclick: () => api("reveal", { path: dest }) }, "Abrir destino"), h("button", { class: "danger", onclick: () => api("job/" + id + "/cancel", {}) }, "Cancelar"), h("button", { onclick: () => close() }, "Cerrar")]);
   waitJob(id, (st) => {
     const ok = (st.results || []).filter((r) => r.ok).length;
-    body.replaceChildren(h("div", { class: "bar" }, h("i", { style: { width: (100 * st.progress).toFixed(1) + "%" } })),
+    body.replaceChildren(...[h("div", { class: "bar" }, h("i", { style: { width: (100 * st.progress).toFixed(1) + "%" } })),
       h("p", {}, `${fmtB(st.done_bytes)} de ${fmtB(st.total_bytes)} · ${st.speed ? fmtB(st.speed) + "/s" : ""}`),
       h("p", { class: "muted mono" }, st.current || ""),
       st.error ? h("div", { class: "notice bad" }, st.error) : null,
-      st.done && !st.error ? h("div", { class: "notice ok" }, `${ok} de ${st.count} archivos recuperados en ${st.dest}. Informe JSON/CSV con MD5 junto a los archivos.`) : null,
-      ...(st.results || []).filter((r) => !r.ok || r.note).slice(-20).map((r) => h("div", { class: "muted" }, r.name + ": " + (r.note || "error"))));
+      st.done && !st.error ? h("div", { class: "notice " + (ok === st.count ? "ok" : "warn") }, `${ok} de ${st.count} archivos recuperados en ${st.dest}. Informe JSON/CSV con MD5 junto a los archivos.`,
+        (st.results || []).some((r) => r.mhl) ? ` ${(st.results || []).filter((r) => r.mhl === "OK").length} verificados con su MHL (hash idéntico al original).` : "") : null,
+      st.done && !st.error && (st.results || []).some((r) => r.estado === "no_verificado") ? h("div", { class: "notice warn" },
+        h("b", {}, `${(st.results || []).filter((r) => r.estado === "no_verificado").length} clips NO coinciden con el hash del MHL. `),
+        "Se guardaron con el sufijo «_NO_VERIFICADO» (nunca con el nombre original) porque les faltan datos que ya se sobrescribieron en el disco. " +
+        "Sirven para revisar o para un uso provisional, no como copia de entrega: para el clip íntegro hace falta otra copia (tarjeta de cámara u otro disco del rodaje).") : null,
+      st.done && !st.error && (st.results || []).some((r) => r.estado === "sin_mhl") ? h("div", { class: "notice warn" },
+        "Algunos clips se copiaron sin MHL: no se puede garantizar que sean idénticos al original.") : null,
+      ...(st.results || []).filter((r) => !r.ok || r.note).slice(-20).map((r) => h("div", { class: "muted" }, r.name + ": " + (r.note || "error")))].filter(Boolean));
   });
 }
 

@@ -101,6 +101,8 @@ def load(path):
 def resume(path, log=None):
     """A new Scan that continues the deep pass of an incomplete session, keeping what it already found."""
     old = load(path)
+    if old.mode == "zeroed":
+        raise ValueError("Este modo no se reanuda: vuelve a ejecutarlo; los resultados guardados se pueden abrir desde el historial.")
     sc = Scan(old.path, deep=True, categories=old.categories, exts=old.exts, scope=old.scope,
               lost_partitions=False, resume_from=old.resume_offset, label=old.label, mode=old.mode, log=log)
     sc.items = old.items

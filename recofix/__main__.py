@@ -3,6 +3,7 @@
   python3 -m recofix serve [--port 8765] [--no-browser]
   python3 -m recofix scan ORIGEN [--rapido] [--json] [--tipos video,photo] [--carpeta /DCIM]
   python3 -m recofix recover ORIGEN DESTINO [--grupo deleted] [--categoria video] [--ext mxf] [--rapido]
+  python3 -m recofix zeroed ORIGEN [DESTINO] [--mhl RUTA ...] [--todo-el-volumen]
   python3 -m recofix partitions ORIGEN
   python3 -m recofix image ORIGEN SALIDA.img
   python3 -m recofix reassemble ORIGEN OFFSET SALIDA.mp4 [--cluster 32768]
@@ -49,6 +50,68 @@ def _print(r):
         sys.exit(1)
 
 
+def _zeroed(a):
+    from .recover import Recovery
+    from .scanner import run_in_thread
+    from .zeroed import ZeroedScan, preflight
+    if a.diagnostico:
+        d = preflight(a.origen, mhl_paths=a.mhl, include_missing=a.ausentes)
+        print(d["advice"])
+        if d.get("volume"):
+            v = d["volume"]
+            print("Volumen «%s»: %d archivos, clusters de %d B, %d MHL leídos" % (v["label"], v["files"], v["cluster_size"], len(d["mhl_files"])))
+        for t in d["targets"]:
+            print("  %-40s %s  MHL: %s" % (t["name"][:40], _human(t["size"]) if t["size"] else "?", "sí" if t["has_mhl"] else "FALTA"))
+        for w in d["warnings"]:
+            print("AVISO:", w)
+        if d["verdict"] not in ("listo", "parcial"):
+            sys.exit(1)
+        return
+    rng = None
+    if a.rango:
+        try:
+            lo, hi = (int(x) for x in a.rango.split("-"))
+        except ValueError:
+            sys.exit("error: --rango debe ser A-B con dos números de cluster (p. ej. 29000000-29700000)")
+        rng = (lo, hi)
+    s = ZeroedScan(a.origen, mhl_paths=a.mhl, search="all" if a.todo_el_volumen else "near", cluster_range=rng,
+                   include_missing=a.ausentes)
+    t = run_in_thread(s)
+    while t.is_alive():
+        st = s.status()
+        sys.stderr.write("\r%-28s %5.1f%%  encontrados %d   " % (st["phase"][:28], 100 * st["progress"], st["found"]))
+        time.sleep(0.5)
+    sys.stderr.write("\n")
+    if s.error:
+        sys.exit("error: " + s.error)
+    for e in s.mhl_errors:
+        print("aviso MHL:", e)
+    for it in s.items:
+        print("%-12s %10s  @%-14d %s  [%s]" % (it.name[:40], _human(it.size), it.start, it.path, it.note))
+    for u in s.unresolved:
+        print("SIN RESOLVER %s: %s" % (u["path"], u["reason"]))
+        if u.get("fix"):
+            print("    qué hacer: " + u["fix"])
+    if s.summary:
+        print(s.summary)
+    if not a.destino:
+        return
+    r = Recovery(a.origen, s.items, a.destino)
+    r.run()
+    if r.error:
+        sys.exit("error: " + r.error)
+    for x in r.results:
+        print("%-5s %-34s mhl=%s %s" % ("OK" if x["ok"] else "FALLO", os.path.basename(x["path"]), x.get("mhl", "-"), x["note"]))
+    bad = sum(1 for x in r.results if x.get("estado") == "no_verificado")
+    if bad:
+        print("AVISO: %d clips no coinciden con el MHL y se guardaron como _NO_VERIFICADO (faltan datos sobrescritos)" % bad)
+    ok = sum(1 for x in r.results if x["ok"])
+    verified = sum(1 for x in r.results if x.get("mhl") == "OK")
+    print("recuperados %d/%d en %s (%d verificados con su hash del MHL)" % (ok, len(r.results), a.destino, verified))
+    if ok != len(r.results) or s.unresolved:
+        sys.exit(1)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="recofix", description="RecoFix · recuperación y reparación de datos")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -69,6 +132,14 @@ def main(argv=None):
         p.add_argument("--rapido", action="store_true", help="solo sistema de archivos")
         p.add_argument("--tipos", help="categorías: video,photo,audio,document,archive,other")
         p.add_argument("--carpeta", help="solo entradas bajo esta carpeta del volumen")
+    p = sub.add_parser("zeroed", help="rescate de clips vaciados (0 bytes) cuyos datos siguen en el espacio libre (exFAT + MHL)")
+    p.add_argument("origen")
+    p.add_argument("destino", nargs="?", help="si se indica, recupera los clips encontrados aquí (otro disco)")
+    p.add_argument("--mhl", action="append", default=[], help="manifiesto de hashes: .mhl, .md5, .sha1, .sha256, .xxh64 o carpeta que los contenga (se usan además de los del volumen)")
+    p.add_argument("--rango", help="limitar la búsqueda a clusters A-B (p. ej. 29000000-29700000)")
+    p.add_argument("--ausentes", action="store_true", help="buscar también los archivos del manifiesto que no aparecen en el disco")
+    p.add_argument("--diagnostico", action="store_true", help="solo analizar el volumen y explicar qué se puede rescatar")
+    p.add_argument("--todo-el-volumen", action="store_true", help="buscar en todo el volumen, no solo junto a los demás archivos de la carpeta")
     p = sub.add_parser("partitions")
     p.add_argument("origen")
     p = sub.add_parser("image")
@@ -113,6 +184,8 @@ def main(argv=None):
         if r.error:
             sys.exit("error: " + r.error)
         print("recuperados %d/%d en %s" % (sum(1 for x in r.results if x["ok"]), len(r.results), a.destino))
+    elif a.cmd == "zeroed":
+        _zeroed(a)
     elif a.cmd == "partitions":
         from .fs import volumes
         from .partitions import find_lost

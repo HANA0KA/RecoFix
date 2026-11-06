@@ -19,11 +19,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import devices, formats, imaging, mhl, reassembly, remote, rescue, sessions, smart
 from .modes import camera, locations, timemachine, trash
-from .recover import Recovery, check_destination
+from .recover import Recovery, check_destination, check_space, free_space
 from .repair import document, photo, video
 from .scanner import Scan, quick_info
 from .source import Source
 from .util import chown_user, home, tool, unique
+from .zeroed import ZeroedScan, preflight as zeroed_preflight
 
 WEB = os.path.join(os.path.dirname(__file__), "web")
 FFMPEG = tool("ffmpeg")
@@ -39,6 +40,13 @@ def log(msg):
 
 
 # ---------------------------------------------------------------- jobs
+
+def _mhl_list(b):
+    mhls = b.get("mhl") or []
+    if not isinstance(mhls, list) or not all(isinstance(x, str) for x in mhls):
+        raise ValueError("«mhl» debe ser una lista de rutas")
+    return mhls
+
 
 class FuncJob:
     """Run ``fn(job)`` in a thread; ``fn`` may update ``job.progress`` / ``job.phase`` and check ``job.cancel``."""
@@ -418,14 +426,32 @@ class Handler(BaseHTTPRequestHandler):
             return info
         if p == ["locations", "resolve"]:
             return locations.resolve_folder(b["path"])
+        if p == ["zeroed", "preflight"]:
+            path = b["path"]
+            if os.path.isfile(path):
+                path = imaging.open_image(path)["path"]
+            return zeroed_preflight(path, mhl_paths=_mhl_list(b), volume_index=b.get("volume"),
+                                    include_missing=bool(b.get("include_missing")))
+        if p == ["dest", "space"]:
+            free = free_space(b["path"])
+            need = int(b.get("need") or 0)
+            return {"free": free, "need": need, "ok": free is None or need <= free - (64 << 20)}
         if p == ["scan"]:
             path = b["path"]
             if os.path.isfile(path):
                 path = imaging.open_image(path)["path"]
-            scan = Scan(path, deep=b.get("deep", True), categories=b.get("categories") or None,
-                        exts=b.get("exts") or None, scope=b.get("scope") or None, volume_index=b.get("volume"),
-                        lost_partitions=b.get("lost_partitions", True), label=b.get("label") or "",
-                        mode=b.get("mode") or "disk", log=log)
+            if b.get("mode") == "zeroed":
+                rng = b.get("range")
+                if rng is not None and not (isinstance(rng, list) and len(rng) == 2 and all(isinstance(x, int) for x in rng)):
+                    raise ValueError("«range» debe ser [cluster_inicial, cluster_final]")
+                scan = ZeroedScan(path, mhl_paths=_mhl_list(b), search="all" if b.get("search") == "all" else "near",
+                                  volume_index=b.get("volume"), label=b.get("label") or "", log=log, cluster_range=rng,
+                                  include_missing=bool(b.get("include_missing")))
+            else:
+                scan = Scan(path, deep=b.get("deep", True), categories=b.get("categories") or None,
+                            exts=b.get("exts") or None, scope=b.get("scope") or None, volume_index=b.get("volume"),
+                            lost_partitions=b.get("lost_partitions", True), label=b.get("label") or "",
+                            mode=b.get("mode") or "disk", log=log)
             jid = start(scan, "scan")
             log("escaneo %s (%s) de %s" % (jid, scan.mode, path))
             return {"id": jid}
@@ -461,6 +487,7 @@ class Handler(BaseHTTPRequestHandler):
             scan = JOBS[b["scan"]]
             items = [scan.items[i] for i in b["ids"]] if b.get("ids") is not None else filtered(scan, b.get("filter") or {})
             check_destination(scan.path, b["dest"])
+            check_space(b["dest"], sum(max(0, i.size) for i in items))
             rec = Recovery(scan.path, items, b["dest"], finalize_mxf=b.get("finalize_mxf", True),
                            keep_structure=b.get("keep_structure", True), log=log)
             rec.label = "Recuperar %d archivos" % len(items)
@@ -583,7 +610,7 @@ def _ls(path, show):
         isdir = os.path.isdir(full)
         low = n.lower()
         if isdir or show == "all" or show == "images" and low.endswith(imaging.IMAGE_EXT) or \
-                show == "media" and low.endswith(MEDIA_EXT):
+                show == "media" and low.endswith(MEDIA_EXT) or show == "manifest" and low.endswith(mhl.LIST_EXTS + (".txt",)):
             try:
                 size = 0 if isdir else os.path.getsize(full)
             except OSError:

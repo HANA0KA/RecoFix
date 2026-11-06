@@ -71,6 +71,70 @@ class FAT:
             c = self.next(c)
         return out
 
+    def cluster_of(self, off):
+        """Cluster number that holds the absolute byte offset ``off``."""
+        return 2 + (off - self.data_off) // self.cs
+
+    def chain_runs(self, first, need):
+        """Layout of a file as ``[(cluster, count)]`` runs, following the FAT chain; ``(runs, issues)``.
+
+        A deleted or reset entry has its chain freed (all zeros): an entry of 0 means "the next cluster", which is
+        the contiguous layout nearly every camera and card writes. An end mark before ``need`` clusters is reported.
+        """
+        runs, issues, x, got = [], [], first, 0
+        limit = self.n_clusters + 2
+        while got < need:
+            if x < 2 or x >= limit:
+                issues.append("la cadena FAT apunta fuera del volumen (cluster %d tras %d de %d)" % (x, got, need))
+                break
+            if runs and runs[-1][0] + runs[-1][1] == x:
+                runs[-1] = (runs[-1][0], runs[-1][1] + 1)
+            else:
+                runs.append((x, 1))
+            got += 1
+            if got >= need:
+                break
+            e = self.next(x)
+            if e == 0:
+                x += 1
+            elif self.eoc(e):
+                issues.append("la cadena FAT termina en el cluster %d tras %d de %d" % (x, got, need))
+                x += 1
+            else:
+                x = e
+        return runs, issues
+
+    def is_used(self, c):
+        """True when the FAT says cluster ``c`` belongs to a file (entry != 0); None if out of range."""
+        if not 2 <= c < self.n_clusters + 2:
+            return None
+        return self.next(c) != 0
+
+    def used_in_runs(self, runs):
+        """Clusters of ``runs`` that some file owns today; ``[(first, count)]``."""
+        out = []
+        for c0, n in runs:
+            start = None
+            for c in range(c0, c0 + n):
+                u = self.is_used(c)
+                if u and start is None:
+                    start = c
+                elif not u and start is not None:
+                    out.append((start, c - start))
+                    start = None
+            if start is not None:
+                out.append((start, c0 + n - start))
+        return out
+
+    def allocated_count(self, first, n):
+        return sum(1 for c in range(first, first + n) if self.is_used(c))
+
+    def free_count(self):
+        """Free clusters according to the FAT (None on very large volumes, where counting would take too long)."""
+        if self.n_clusters > 20_000_000:
+            return None
+        return sum(1 for c in range(2, self.n_clusters + 2) if self.next(c) == 0)
+
     def extents(self, first, size, deleted):
         if size == 0 or first < 2:
             return [], ""
@@ -146,4 +210,6 @@ class FAT:
                 out.append(fe)
                 if on_entry:
                     on_entry(fe)
+        self._dirs_seen = seen | ({self.root_cluster} if self.kind == 32 else set())
+        self.root = self.root_cluster if self.kind == 32 else 0
         return out

@@ -53,4 +53,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+# make Finder and the Dock pick up the icon of the rebuilt bundle instead of showing the cached (or generic) one
+touch "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
 echo "Construido: $APP"
